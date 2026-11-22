@@ -1,0 +1,511 @@
+#include <stdint.h>                                      /* เรียกใช้ชนิดตัวแปรมาตรฐาน เช่น uint8_t, uint32_t */
+#include <stdbool.h>                                     /* เรียกใช้ชนิดตัวแปรตรรกะ bool (true/false) */
+#include <stddef.h>                                      /* เรียกใช้ค่าคงที่มาตรฐาน เช่น NULL */
+#include "MK64F12.h"                                     /* เรียกใช้ไฟล์กำหนดรีจิสเตอร์ของชิป NXP MK64F12 */
+
+/* =============================================================================
+1. MACROS FOR GPIO CONTROL (D4=PTB23, D7=PTC3, D8=PTC12, D3 Buzzer=PTA1)
+   ============================================================================= */
+#define LATCH_LOW()  (PTB->PCOR = (1<<23))               /* ดึงขา Latch (PTB23 / D4) ลงเป็น Logic 0 (Low) */
+#define LATCH_HIGH() (PTB->PSOR = (1<<23))               /* ดึงขา Latch (PTB23 / D4) ขึ้นเป็น Logic 1 (High) */
+#define CLOCK_LOW()  (PTC->PCOR = (1<<3))                /* ดึงขา Clock (PTC3 / D7) ลงเป็น Logic 0 (Low) */
+#define CLOCK_HIGH() (PTC->PSOR = (1<<3))                /* ดึงขา Clock (PTC3 / D7) ขึ้นเป็น Logic 1 (High) */
+#define DATA_LOW()   (PTC->PCOR = (1<<12))               /* ดึงขา Data (PTC12 / D8) ลงเป็น Logic 0 (Low) */
+#define DATA_HIGH()  (PTC->PSOR = (1<<12))               /* ดึงขา Data (PTC12 / D8) ขึ้นเป็น Logic 1 (High) */
+
+#define SEG_BLANK 0xFF                                   /* รหัสปิดทุกขีดของ 7-Segment (Active Low: 1=ดับ) */
+
+/* =============================================================================
+2. SYSTICK TIMER & TIMEKEEPING 
+   ============================================================================= */
+static volatile uint32_t g_sysTickMs = 0;                /* ตัวแปรนับเวลาหน่วยมิลลิวินาที (อัปเดตโดย Interrupt) static ที่วางไว้หน้าตัวแปร Global และฟังก์ชันย่อย เป็นการจำกัดขอบเขตการเข้าถึง (Internal Linkage) ของไฟล์นี  */
+
+void SysTick_Handler(void) {                             /* ฟังก์ชันขัดจังหวะ SysTick ทำงานทุกๆ 1 ms */
+    g_sysTickMs++;                                       /* เพิ่มค่าตัวนับเวลาขึ้นทีละ 1 ms */
+}
+/* หน่วงเวลาไว้ใช้ทั่วไป */
+static void delay_ms(uint32_t ms) {                      /* ฟังก์ชันหน่วงเวลาตามจำนวนมิลลิวินาทีที่ระบุ */
+    uint32_t start = g_sysTickMs;                        /* บันทึกเวลาเริ่มต้น */
+    while ((g_sysTickMs - start) < ms);                  /* วนรอจนกว่าเวลาที่ผ่านไปจะครบตามที่กำหนด */
+}
+/* หน่วงเวลาไว้ใช้ทั่วไป */
+
+/*Fungtion หน่วงเวลาตอน จะdata clok lantch เข้า shield Dummy Loop กัน bit หล่น*/
+static void delay_short(void) {                          /* ฟังก์ชันหน่วงเวลาสั้นๆ สำหรับจังหวะส่งข้อมูล Shift Register */
+    volatile int d;                                      /* ตัวแปรนับรอบ (volatile กันคอมไพเลอร์ตัดลูปทิ้ง) */
+    for (d = 0; d < 20; d++) { __NOP(); }                /* สั่ง CPU ว่างงาน 20 รอบ */
+/*Fungtion หน่วงเวลาตอน จะdata clok lantch เข้า shield Dummy Loop กัน bit หล่น */
+}
+
+/* =============================================================================
+3. BUZZER DIRECT DRIVE 
+   ============================================================================= */
+static void buzzer_timer_init(void) {                    /* ฟังก์ชันตั้งค่าขา Buzzer (PTA1 / D3) */
+    SIM->SCGC5 |= SIM_SCGC5_PORTA_MASK;                  /* เปิดสัญญาณนาฬิกา (Clock) ให้กับ Port A */
+    PORTA->PCR[1] = PORT_PCR_MUX(1);                     /* ตั้งค่าขา PTA1 ให้ทำงานในโหมด GPIO */
+    PTA->PCOR = (1<<1);                                  /* เคลียร์ค่าเอาต์พุตของ PTA1 เป็น 0 (Active Low เปิดเสียงเมื่อเป็น 0) */
+    PTA->PDDR &= ~(1<<1);                                /* ตั้งทิศทาง PTA1 เป็น Input (High-Z) เพื่อตัดกระแสปิดเสียงไว้ก่อน */
+}
+
+static void setBuzzer(uint32_t freq) {                   /* ฟังก์ชันสร้างความถี่เสียงออก Buzzer */
+    if (freq == 0) {                                     /* กรณีความถี่เป็น 0 (เงียบ/พักโน้ต) */
+        PTA->PDDR &= ~(1<<1);                            /* ปรับขาเป็น Input เพื่อหยุดจ่ายสัญญาณเสียง */
+    } else {                                             /* กรณีมีค่าความถี่โน้ตเพลง */
+        int i;                                           /* ตัวแปรนับจำนวนลูกคลื่น */
+        for (i = 0; i < 15; i++) {                       /* สร้างคลื่นสี่เหลี่ยม 15 รอบต่อหนึ่งจังหวะสแกนจอ */
+            PTA->PDDR |= (1<<1);                         /* ตั้งเป็น Output (ดึงลง 0V) เพื่อเปิดเสียงครึ่งคาบแรก */
+            {
+                volatile int d;                          /* ตัวแปรหน่วงเวลา */
+                int limit = (int)(100000 / freq);        /* คำนวณเวลาครึ่งคาบจากความถี่ (ยิ่งถี่สูง limit ยิ่งน้อย) */
+                for (d = 0; d < limit; d++) { __NOP(); } /* หน่วงเวลาครึ่งคาบแรก */
+            }
+            PTA->PDDR &= ~(1<<1);                        /* ตั้งเป็น Input (ปล่อยลอย) เพื่อปิดเสียงครึ่งคาบหลัง */
+            {
+                volatile int d;                          /* ตัวแปรหน่วงเวลา */
+                int limit = (int)(100000 / freq);        /* คำนวณเวลาครึ่งคาบหลัง */
+                for (d = 0; d < limit; d++) { __NOP(); } /* หน่วงเวลาครึ่งคาบหลัง */
+            }
+        }
+        PTA->PDDR &= ~(1<<1);                            /* ปิดเสียงหลังจบรอบป้องกันเสียงค้างระหว่างสแกนจอ */
+    }
+}
+
+/* =============================================================================
+4. STATE MACHINE & INTERRUPT FLAGS 
+   ============================================================================= */
+/*enum SystemState { ... }; $\rightarrow$ สร้างรายการตัวเลือกสถานะทั้งหมดที่มี (3 สถานะ)*/
+enum SystemState {                                       /* กำหนดสถานะการทำงานของเครื่องเล่นเพลง */
+    STATE_IDLE_HELLO,                                    /* สถานะที่ 1: หน้าจอเริ่มต้นแสดงข้อความวิ่ง HELLO */
+    STATE_SELECT_SONG,                                   /* สถานะที่ 2: หน้าจอเลือกหมายเลขเพลง (S-01 ถึง S-05) */
+    STATE_PLAYING_SONG                                   /* สถานะที่ 3: กำลังเล่นเพลงและแสดงเวลานับถอยหลัง */
+};
+/*enum SystemState { ... }; $\rightarrow$ สร้างรายการตัวเลือกสถานะทั้งหมดที่มี (3 สถานะ)*/
+
+
+static volatile enum SystemState currentState = STATE_IDLE_HELLO; /* เริ่มต้นโปรแกรมให้อยู่ในสถานะ IDLE_HELLO */
+
+#define TOTAL_SONGS 5                                    /* กำหนดจำนวนเพลงทั้งหมดในระบบคือ 5 เพลง */
+static volatile int selectedSongIndex = 1;               /* ตัวแปรเก็บหมายเลขเพลงที่เลือกอยู่ (เริ่มต้นที่เพลง 1) */
+
+static volatile bool flagS1Pressed = false;              /* ธงแจ้งเตือนเมื่อกดปุ่ม S1 ในหน้าเลือกเพลง */
+static volatile bool flagS2Pressed = false;              /* ธงแจ้งเตือนเมื่อกดปุ่ม S2 */
+static volatile bool flagS3Pressed = false;              /* ธงแจ้งเตือนเมื่อกดปุ่ม S3 ในหน้าเลือกเพลง */
+static volatile bool flagCancelSong = false;             /* ธงสั่งยกเลิกการเล่นเพลง (กด S1 ระหว่างเล่น) */
+static volatile bool flagPauseSong  = false;             /* ธงสลับสถานะพัก/เล่นต่อ (กด S2 ระหว่างเล่น) */
+
+static volatile uint32_t lastDebounceTimeS1 = 0;         /* เก็บเวลาล่าสุดที่กด S1 เพื่อกันปุ่มเบิ้ล */
+static volatile uint32_t lastDebounceTimeS2 = 0;         /* เก็บเวลาล่าสุดที่กด S2 เพื่อกันปุ่มเบิ้ล */
+static volatile uint32_t lastDebounceTimeS3 = 0;         /* เก็บเวลาล่าสุดที่กด S3 เพื่อกันปุ่มเบิ้ล */
+
+void PORTB_IRQHandler(void) {                            /* ฟังก์ชันขัดจังหวะเมื่อมีการกดปุ่มบน Port B */
+    uint32_t isfr = PORTB->ISFR;                         /* อ่านค่าธง Interrupt Status Flag Register ของ Port B */
+    uint32_t now = g_sysTickMs;                          /* อ่านเวลาปัจจุบันของระบบ */
+
+ 	/*ไปand ที่บิตนั้นๆ เพื่อเช็คว่าขานั้นเป็น 1จริงมั้ย */
+    if (isfr & (1<<3)) {                                 /* ตรวจสอบว่าเกิด Interrupt จากขา PTB3 (ปุ่ม S1) หรือไม่ */
+        if ((now - lastDebounceTimeS1) > 250) {          /* เช็กระยะเวลาป้องกันหน้าสัมผัสปุ่มสั่น (Debounce 150ms) */
+            lastDebounceTimeS1 = now;                    /* อัปเดตเวลาที่กดล่าสุด */
+            if (currentState == STATE_PLAYING_SONG) flagCancelSong = true; /* ถ้ากำลังเล่นเพลง ให้ตั้งธงยกเลิกเพลง */
+            else if (currentState == STATE_SELECT_SONG) flagS1Pressed = true; /* ถ้าอยู่หน้าเลือกเพลง ให้ตั้งธงเลื่อนลง */
+        }
+        PORTB->ISFR = (1<<3);                            /* เขียน 1 เพื่อเคลียร์ธง Interrupt ของขา PTB3 */
+    }
+
+    if (isfr & (1<<10)) {                                /* ตรวจสอบว่าเกิด Interrupt จากขา PTB10 (ปุ่ม S2) หรือไม่ */
+        if ((now - lastDebounceTimeS2) > 250) {          /* เช็ก Debounce 150ms */
+            lastDebounceTimeS2 = now;                    /* อัปเดตเวลาที่กดล่าสุด */
+            if (currentState == STATE_PLAYING_SONG) {    /* ถ้ากำลังเล่นเพลงอยู่ */
+                flagPauseSong = !flagPauseSong;          /* สลับสถานะ Pause (พัก <-> เล่นต่อ) */
+            } else {                                     /* ถ้าอยู่หน้าอื่น */
+                flagS2Pressed = true;                    /* ตั้งธงยืนยันการเลือก */
+            }
+        }
+        PORTB->ISFR = (1<<10);                           /* เคลียร์ธง Interrupt ของขา PTB10 */
+    }
+
+    if (isfr & (1<<11)) {                                /* ตรวจสอบว่าเกิด Interrupt จากขา PTB11 (ปุ่ม S3) หรือไม่ */
+        if ((now - lastDebounceTimeS3) > 250) {          /* เช็ก Debounce 150ms */
+            lastDebounceTimeS3 = now;                    /* อัปเดตเวลาที่กดล่าสุด */
+            if (currentState == STATE_SELECT_SONG) flagS3Pressed = true; /* ถ้าอยู่หน้าเลือกเพลง ให้ตั้งธงเลื่อนขึ้น */
+        }
+        PORTB->ISFR = (1<<11);                           /* เคลียร์ธง Interrupt ของขา PTB11 */
+    }
+   /*ไปand ที่บิตนั้นๆ เพื่อเช็คว่าขานั้นเป็น 1จริงมั้ย */ 	
+}
+
+/* =============================================================================
+5. HARDWARE INITIALIZATION 
+   ============================================================================= */
+static void hardware_init(void) {                        /* ฟังก์ชันตั้งค่าฮาร์ดแวร์ทั้งหมดตอนเปิดเครื่อง */
+    uint32_t btn_cfg;                                    /* ตัวแปรพักค่าการตั้งค่าพินปุ่มกด */
+
+    WDOG->UNLOCK = 0xC520;                               /* ส่งรหัสปลดล็อก Watchdog ชุดที่ 1 */
+    WDOG->UNLOCK = 0xD928;                               /* ส่งรหัสปลดล็อก Watchdog ชุดที่ 2 */
+    WDOG->STCTRLH &= ~WDOG_STCTRLH_WDOGEN_MASK;          /* ปิดการทำงานของ Watchdog Timer กันบอร์ดรีเซ็ตเอง */
+
+    SIM->SCGC5 |= SIM_SCGC5_PORTA_MASK | SIM_SCGC5_PORTB_MASK | /* เปิด Clock ให้ Port A และ Port B */
+                  SIM_SCGC5_PORTC_MASK | SIM_SCGC5_PORTD_MASK;  /* เปิด Clock ให้ Port C และ Port D */
+
+	  /*7 Segment*/
+    PORTB->PCR[23] = PORT_PCR_MUX(1);                    /* ตั้งขา PTB23 (Latch D4) เป็น GPIO */
+    PORTC->PCR[3]  = PORT_PCR_MUX(1);                    /* ตั้งขา PTC3 (Clock D7) เป็น GPIO */
+    PORTC->PCR[12] = PORT_PCR_MUX(1);                    /* ตั้งขา PTC12 (Data D8) เป็น GPIO */
+    PTB->PDDR |= (1<<23);                                /* กำหนด PTB23 เป็น Output */
+    PTC->PDDR |= (1<<3) | (1<<12);                       /* กำหนด PTC3 และ PTC12 เป็น Output */
+	  /*7 Segment*/
+
+	/*"เราเปิด Pull-up ให้ขาปุ่มกด A1, A2, A3 (PTB3, PTB10, PTB11) มีสถานะเป็น Logic 1 (High) รอไว้ครับ เพื่อที่เวลาผู้ใช้กดปุ่มลงกราวด์ สถานะจะเปลี่ยนจาก 1 ลงเป็น 0 (Falling Edge) ซึ่งจะไปกระตุ้นให้เกิด Interrupt ทันทีครับ"*/
+    btn_cfg = PORT_PCR_MUX(1) | PORT_PCR_PE_MASK | PORT_PCR_PS_MASK | PORT_PCR_IRQC(0xA); /* GPIO + Pull-up + Interrupt ขอบขาลง */
+    PORTB->PCR[3]  = btn_cfg;                            /* ใช้การตั้งค่านี้กับขา PTB3 (ปุ่ม S1) */
+    PORTB->PCR[10] = btn_cfg;                            /* ใช้การตั้งค่านี้กับขา PTB10 (ปุ่ม S2) */
+    PORTB->PCR[11] = btn_cfg;                            /* ใช้การตั้งค่านี้กับขา PTB11 (ปุ่ม S3) */
+    PTB->PDDR &= ~(uint32_t)((1<<3) | (1<<10) | (1<<11)); /* กำหนดทิศทางขาปุ่มกดทั้ง 3 เป็น Input */
+	/*"เราเปิด Pull-up ให้ขาปุ่มกด A1, A2, A3 (PTB3, PTB10, PTB11) มีสถานะเป็น Logic 1 (High) รอไว้ครับ เพื่อที่เวลาผู้ใช้กดปุ่มลงกราวด์ สถานะจะเปลี่ยนจาก 1 ลงเป็น 0 (Falling Edge) ซึ่งจะไปกระตุ้นให้เกิด Interrupt ทันทีครับ"*/    
+
+    PORTB->ISFR = 0xFFFFFFFF;                            /* เคลียร์ธง Interrupt ค้างทั้งหมดของ Port B */
+    NVIC_EnableIRQ(PORTB_IRQn);                          /* เปิดรับสัญญาณ Interrupt จาก Port B ในตัวควบคุม NVIC */
+
+    buzzer_timer_init();                                 /* เรียกฟังก์ชันตั้งค่าขา Buzzer */
+
+    SystemCoreClockUpdate();                             /* ไปอ่านค่าจากรีจิสเตอร์ MCG/SIM ในตัวชิปจริงๆ มาคำนวณและอัปเดตใส่ตัวแปร SystemCoreClock */
+    SysTick_Config(SystemCoreClock / 1000);              /* ตั้งให้ SysTick สร้าง Interrupt ทุกๆ 1 ms */
+}
+
+/* =============================================================================
+6. DISPLAY & HARDWARE CONTROLLERS 
+   ============================================================================= */
+static void setAllLeds(bool state) {                     /* ฟังก์ชันเปิด/ปิดไฟ LED บน Shield ทั้ง 4 ดวงพร้อมกัน */
+    if (state) {                                         /* ถ้าต้องการเปิดไฟ (true) */
+        PTD->PCOR = (1<<5) | (1<<4) | (1<<0);            /* ดึงขาเป็น 0V เพื่อเปิดไฟ (Active Low) */
+        PTA->PCOR = (1<<6);                              /* ดึงขา PTA6 เป็น 0V เพื่อเปิดไฟ */
+    } else {                                             /* ถ้าต้องการปิดไฟ (false) */
+        PTD->PSOR = (1<<5) | (1<<4) | (1<<0);            /* ดึงขาเป็น 3.3V เพื่อปิดไฟ */
+        PTA->PSOR = (1<<6);                              /* ดึงขา PTA6 เป็น 3.3V เพื่อปิดไฟ */
+    }
+}
+
+static void shiftOutByte(uint8_t byteVal) {              /* ฟังก์ชันส่งข้อมูล 1 ไบต์ (8 บิต) เข้า 74HC595 ทีละบิต */
+    int i;                                               /* ตัวแปรนับบิต */
+    for (i = 7; i >= 0; i--) {                           /* วนลูปส่งจากบิตสูงสุด (MSB: บิต 7) ไปบิตต่ำสุด (LSB: บิต 0) */
+        if ((byteVal >> i) & 0x01) DATA_HIGH();          /* ถ้าบิตนั้นเป็น 1 ให้ส่ง Data High */
+        else DATA_LOW();                                 /* ถ้าบิตนั้นเป็น 0 ให้ส่ง Data Low */
+        delay_short();                                   /* หน่วงเวลาให้สัญญาณ Data นิ่ง */
+        CLOCK_HIGH();                                    /* สร้างขอบขาขึ้นของ Clock เพื่อดันบิตเข้าชิป */
+        delay_short();                                   /* หน่วงเวลา */
+        CLOCK_LOW();                                     /* ดึง Clock กลับลง Low เพื่อเตรียมส่งบิตถัดไป */
+        delay_short();                                   /* หน่วงเวลา */
+    }
+}
+
+static void writeDigitToShield(uint8_t digitBitmask, uint8_t segmentPattern) { /* ส่งข้อมูลแสดงผล 1 หลักเข้า Shield */
+    LATCH_LOW();                                         /* ดึง Latch ลง Low เพื่อเริ่มส่งข้อมูลชุดใหม่ */
+    delay_short();                                       /* หน่วงเวลา */
+    shiftOutByte(segmentPattern);                        /* ส่งไบต์ที่ 1: รูปแบบขีดตัวอักษร (Segment A-G, DP) */
+    shiftOutByte(digitBitmask);                          /* ส่งไบต์ที่ 2: ตำแหน่งหลักที่จะให้ติด (Digit 1-4) */
+    LATCH_HIGH();                                        /* ดึง Latch ขึ้น High เพื่ออัปเดตข้อมูลออกหน้าจอทันที */
+    delay_short();                                       /* หน่วงเวลา */
+}
+
+static void renderDisplayBuffer(uint8_t displayBuffer[4], int duration_ms) { /* ฟังก์ชันกวาดหน้าจอทั้ง 4 หลัก (Multiplexing) */
+    const uint8_t DIGIT_SELECT[4] = { 0x01, 0x02, 0x04, 0x08 }; /* รหัสเลือกหลักเรียงจากซ้ายไปขวา (หลัก 1 ถึง 4) */
+    uint32_t start_ms = g_sysTickMs;                     /* บันทึกเวลาเริ่มแสดงผล */
+    int i;                                               /* ตัวแปรนับหลัก */
+
+    while ((g_sysTickMs - start_ms) < (uint32_t)duration_ms) { /* วนสแกนหน้าจอจนกว่าจะครบเวลา duration_ms */
+        for (i = 0; i < 4; i++) {                        /* วนทีละหลักตั้งแต่หลักที่ 0 ถึง 3 */
+            writeDigitToShield(DIGIT_SELECT[i], displayBuffer[i]); /* แสดงตัวอักษรในหลักที่ i */
+            delay_ms(2);                                 /* เปิดค้างไว้ 2 ms เพื่อให้ตามองเห็นชัด */
+            writeDigitToShield(0x00, SEG_BLANK);         /* เคลียร์หน้าจอให้ดับก่อนเปลี่ยนหลัก (กันภาพซ้อน/เงา) */
+        }
+    }
+}
+
+/* =============================================================================
+7. MUSICAL DATA
+   ============================================================================= */
+#define REST     0                                       /* ค่าความถี่สำหรับจังหวะเงียบ (ตัวหยุด) */
+#define NOTE_C4  262                                     /* ความถี่โน้ต โด (C4) = 262 Hz */
+#define NOTE_CS4 277                                     /* ความถี่โน้ต โดชาร์ป (C#4) = 277 Hz */
+#define NOTE_D4  294                                     /* ความถี่โน้ต เร (D4) = 294 Hz */
+#define NOTE_E4  330                                     /* ความถี่โน้ต มี (E4) = 330 Hz */
+#define NOTE_F4  349                                     /* ความถี่โน้ต ฟา (F4) = 349 Hz */
+#define NOTE_FS4 370                                     /* ความถี่โน้ต ฟาชาร์ป (F#4) = 370 Hz */
+#define NOTE_G4  392                                     /* ความถี่โน้ต ซอล (G4) = 392 Hz */
+#define NOTE_GS4 415                                     /* ความถี่โน้ต ซอลชาร์ป (G#4) = 415 Hz */
+#define NOTE_A4  440                                     /* ความถี่โน้ต ลา (A4) = 440 Hz */
+#define NOTE_A4S 466                                     /* ความถี่โน้ต ลาชาร์ป (A#4) = 466 Hz */
+#define NOTE_B4  494                                     /* ความถี่โน้ต ที (B4) = 494 Hz */
+#define NOTE_C5  523                                     /* ความถี่โน้ต โดสูง (C5) = 523 Hz */
+#define NOTE_CS5 554                                     /* ความถี่โน้ต โดชาร์ปสูง (C#5) = 554 Hz */
+#define NOTE_D5  587                                     /* ความถี่โน้ต เรสูง (D5) = 587 Hz */
+#define NOTE_D5S 622                                     /* ความถี่โน้ต เรชาร์ปสูง (D#5) = 622 Hz */
+#define NOTE_E5  659                                     /* ความถี่โน้ต มีสูง (E5) = 659 Hz */
+#define NOTE_F5  698                                     /* ความถี่โน้ต ฟาสูง (F5) = 698 Hz */
+#define NOTE_G5  784                                     /* ความถี่โน้ต ซอลสูง (G5) = 784 Hz */
+
+static const int melody1[] = {                           /* อาเรย์เก็บลำดับโน้ตเพลงที่ 1 (Jingle Bells) */
+    NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, 
+    NOTE_E4, NOTE_G4, NOTE_C4, NOTE_D4, NOTE_E4,
+    NOTE_F4, NOTE_F4, NOTE_F4, NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, 
+    NOTE_E4, NOTE_D4, NOTE_D4, NOTE_E4, NOTE_D4, NOTE_G4,
+    NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4,
+    NOTE_E4, NOTE_G4, NOTE_C4, NOTE_D4, NOTE_E4,
+    NOTE_F4, NOTE_F4, NOTE_F4, NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_E4, NOTE_E4, 
+    NOTE_G4, NOTE_G4, NOTE_F4, NOTE_D4, NOTE_C4
+};
+static const int tempo1[]  = {                           /* อาเรย์เก็บตัวหารความยาวจังหวะของเพลงที่ 1 */
+    4, 4, 2, 4, 4, 2, 
+    4, 4, 4, 4, 1, 
+    4, 4, 4, 4, 4, 4, 4, 8, 8, 
+    4, 4, 4, 4, 2, 2,
+    4, 4, 2, 4, 4, 2, 
+    4, 4, 4, 4, 1, 
+    4, 4, 4, 4, 4, 4, 4, 8, 8, 
+    4, 4, 4, 4, 1
+};
+
+static const int melody2[] = {                           /* อาเรย์เก็บลำดับโน้ตเพลงที่ 2 (We Wish You a Merry Christmas) */
+    NOTE_D4, NOTE_G4, NOTE_G4, NOTE_A4, NOTE_G4, NOTE_F4, NOTE_E4, NOTE_E4,
+    NOTE_E4, NOTE_A4, NOTE_A4, NOTE_B4, NOTE_A4, NOTE_G4, NOTE_F4, NOTE_D4,
+    NOTE_D4, NOTE_B4, NOTE_B4, NOTE_C5, NOTE_B4, NOTE_A4, NOTE_G4, NOTE_E4,
+    NOTE_D4, NOTE_D4, NOTE_E4, NOTE_A4, NOTE_F4, NOTE_G4
+};
+static const int tempo2[]  = {                           /* อาเรย์เก็บตัวหารความยาวจังหวะของเพลงที่ 2 */
+    4, 4, 8, 8, 8, 8, 4, 4, 
+    4, 4, 8, 8, 8, 8, 4, 4, 
+    4, 4, 8, 8, 8, 8, 4, 4, 
+    8, 8, 4, 4, 4, 2
+};
+
+static const int melody3[] = {                           /* อาเรย์เก็บลำดับโน้ตเพลงที่ 3 (Happy Birthday) */
+    NOTE_C4, NOTE_C4, NOTE_D4, NOTE_C4, NOTE_F4, NOTE_E4,
+    NOTE_C4, NOTE_C4, NOTE_D4, NOTE_C4, NOTE_G4, NOTE_F4,
+    NOTE_C4, NOTE_C4, NOTE_C5, NOTE_A4, NOTE_F4, NOTE_E4, NOTE_D4,
+    NOTE_A4S, NOTE_A4S, NOTE_A4, NOTE_F4, NOTE_G4, NOTE_F4
+};
+static const int tempo3[]  = {                           /* อาเรย์เก็บตัวหารความยาวจังหวะของเพลงที่ 3 */
+    8, 8, 4, 4, 4, 2,
+    8, 8, 4, 4, 4, 2,
+    8, 8, 4, 4, 4, 4, 2,
+    8, 8, 4, 4, 4, 2
+};
+
+static const int melody4[] = {                           /* อาเรย์เก็บลำดับโน้ตเพลงที่ 4 (Twinkle Twinkle Little Star) */
+    NOTE_C4, NOTE_C4, NOTE_G4, NOTE_G4, NOTE_A4, NOTE_A4, NOTE_G4, REST,
+    NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_D4, NOTE_D4, NOTE_C4, REST,
+    NOTE_G4, NOTE_G4, NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_D4, REST,
+    NOTE_G4, NOTE_G4, NOTE_F4, NOTE_F4, NOTE_E4, NOTE_E4, NOTE_D4, REST
+};
+static const int tempo4[]  = {                           /* อาเรย์เก็บตัวหารความยาวจังหวะของเพลงที่ 4 */
+    4, 4, 4, 4, 4, 4, 2, 8,
+    4, 4, 4, 4, 4, 4, 2, 8,
+    4, 4, 4, 4, 4, 4, 2, 8,
+    4, 4, 4, 4, 4, 4, 2, 8
+};
+
+static const int melody5[] = {                           /* อาเรย์เก็บลำดับโน้ตเพลงที่ 5 (เสียงเรียกเข้า Nokia 3310) */
+    NOTE_E5, NOTE_D5, NOTE_FS4, NOTE_GS4,
+    NOTE_CS5, NOTE_B4, NOTE_D4, NOTE_E4,
+    NOTE_B4, NOTE_A4, NOTE_CS4, NOTE_E4,
+    NOTE_A4
+};
+static const int tempo5[]  = {                           /* อาเรย์เก็บตัวหารความยาวจังหวะของเพลงที่ 5 */
+    8, 8, 4, 4,
+    8, 8, 4, 4,
+    8, 8, 4, 4,
+    2
+};
+
+static const uint8_t PATTERN_PAUS[4]  = { 0x8C, 0x88, 0xC1, 0x92 }; /* รหัส 7-Segment สำหรับคำว่า "PAUS" */
+static const uint8_t DIGIT_MAP[10]    = { 0xC0, 0xF9, 0xA4, 0xB0, 0x99, 0x92, 0x82, 0xF8, 0x80, 0x90 }; /* ตารางแปลงตัวเลข 0-9 เป็นรหัส 7-Segment */
+
+static void updateCountdownBuffer(uint8_t buffer[4], int remainingSeconds) { /* แปลงวินาทีที่เหลือลงบัฟเฟอร์รูปแบบ MM:SS */
+    int minutes;                                         /* ตัวแปรเก็บจำนวนนาที */
+    int seconds;                                         /* ตัวแปรเก็บจำนวนวินาที */
+    if (remainingSeconds < 0) remainingSeconds = 0;      /* ป้องกันไม่ให้เวลาติดลบ */
+    minutes = remainingSeconds / 60;                     /* คำนวณนาที */
+    seconds = remainingSeconds % 60;                     /* คำนวณเศษวินาที */
+
+    buffer[0] = DIGIT_MAP[(minutes / 10) % 10];          /* หลักสิบของนาที */
+    buffer[1] = DIGIT_MAP[minutes % 10] & 0x7F;          /* หลักหน่วยของนาที พร้อมเปิดจุดทศนิยม (& 0x7F) คั่นกลาง */
+    buffer[2] = DIGIT_MAP[(seconds / 10) % 10];          /* หลักสิบของวินาที */
+    buffer[3] = DIGIT_MAP[seconds % 10];                 /* หลักหน่วยของวินาที */
+}
+
+static int calculateTotalSongDurationMs(const int* tempo, int noteCount) { /* คำนวณความยาวรวมทั้งหมดของเพลง (ms) */
+    int totalMs = 0;                                     /* ตัวแปรสะสมเวลาทั้งหมด */
+    int i;                                               /* ตัวแปรนับโน้ต */
+    for (i = 0; i < noteCount; i++) totalMs += (1600 / tempo[i]) + 30; /* บวกเวลาของแต่ละโน้ตรวมกับช่วงเว้นวรรค 30ms */
+    return totalMs;                                      /* ส่งคืนค่าเวลารวมทั้งหมด */
+}
+
+static void playSelectedSongWithControls(int songIndex) { /* ฟังก์ชันหลักสำหรับเล่นเพลงและรองรับปุ่ม Pause/Cancel */
+    const int* melody = NULL;                            /* พอยน์เตอร์ชี้ไปยังอาเรย์โน้ตของเพลงที่เลือก */
+    const int* tempo = NULL;                             /* พอยน์เตอร์ชี้ไปยังอาเรย์จังหวะของเพลงที่เลือก */
+    int noteCount = 0;                                   /* จำนวนโน้ตทั้งหมดในเพลงนั้น */
+    uint32_t songEndTimeMs;                              /* เวลาเป้าหมายที่เพลงจะเล่นจบ */
+    uint32_t pauseStartMs = 0;                           /* บันทึกเวลาตอนเริ่มกดหยุดชั่วคราว (Pause) */
+    int i;                                               /* ตัวแปรนับลำดับโน้ต */
+
+    switch (songIndex) {                                 /* เลือกชุดข้อมูลเพลงตามหมายเลข songIndex */
+        case 1: melody = melody1; tempo = tempo1; noteCount = sizeof(melody1)/sizeof(int); break; /* เลือกเพลงที่ 1 */
+        case 2: melody = melody2; tempo = tempo2; noteCount = sizeof(melody2)/sizeof(int); break; /* เลือกเพลงที่ 2 */
+        case 3: melody = melody3; tempo = tempo3; noteCount = sizeof(melody3)/sizeof(int); break; /* เลือกเพลงที่ 3 */
+        case 4: melody = melody4; tempo = tempo4; noteCount = sizeof(melody4)/sizeof(int); break; /* เลือกเพลงที่ 4 */
+        case 5: melody = melody5; tempo = tempo5; noteCount = sizeof(melody5)/sizeof(int); break; /* เลือกเพลงที่ 5 */
+    }
+    
+    if (melody == NULL) return;                          /* ถ้าไม่พบเพลง ให้จบการทำงานทันที */
+
+    flagCancelSong = false;                              /* รีเซ็ตธงยกเลิกเพลงก่อนเริ่มเล่น */
+    flagPauseSong  = false;                              /* รีเซ็ตธงพักเพลงก่อนเริ่มเล่น */
+    flagS2Pressed  = false;                              /* เคลียร์ธงกดปุ่ม S2 ที่อาจค้างอยู่ */
+
+    songEndTimeMs = g_sysTickMs + (uint32_t)calculateTotalSongDurationMs(tempo, noteCount); /* คำนวณเวลาสิ้นสุดเพลง */
+
+    for (i = 0; i < noteCount; i++) {                    /* วนลูปเล่นทีละโน้ตจนครบทุกตัวในเพลง */
+        int noteDuration = 1600 / tempo[i];              /* คำนวณความยาวของโน้ตตัวปัจจุบัน (ms) */
+        uint32_t noteStart = g_sysTickMs;                /* บันทึกเวลาที่เริ่มเล่นโน้ตตัวนี้ */
+        uint32_t restStart;                              /* ตัวแปรเก็บเวลาเริ่มช่วงเว้นวรรคระหว่างโน้ต */
+
+        while ((g_sysTickMs - noteStart) < (uint32_t)noteDuration) { /* เล่นโน้ตตัวนี้ค้างไว้จนครบเวลา noteDuration */
+            if (flagCancelSong) {                        /* ตรวจสอบว่ามีการกดปุ่ม S1 เพื่อยกเลิกหรือไม่ */
+                setBuzzer(0);                            /* ปิดเสียง Buzzer */
+                setAllLeds(false);                       /* ปิดไฟ LED */
+                flagCancelSong = false;                  /* เคลียร์ธงยกเลิก */
+                flagS2Pressed = false;                   /* เคลียร์ธงปุ่ม S2 */
+                return;                                  /* ออกจากฟังก์ชันเล่นเพลงทันที */
+            }
+
+            if (flagPauseSong) {                         /* ตรวจสอบว่ามีการกดปุ่ม S2 เพื่อ Pause หรือไม่ */
+                uint8_t pausBuffer[4];                   /* บัฟเฟอร์สำหรับแสดงคำว่า PAUS */
+                setBuzzer(0);                            /* ปิดเสียง Buzzer ชั่วคราว */
+                setAllLeds(false);                       /* ปิดไฟ LED */
+                pauseStartMs = g_sysTickMs;              /* บันทึกเวลาเริ่มต้นตอนกด Pause */
+
+                pausBuffer[0] = PATTERN_PAUS[0];         /* ใส่ตัวอักษร 'P' */
+                pausBuffer[1] = PATTERN_PAUS[1];         /* ใส่ตัวอักษร 'A' */
+                pausBuffer[2] = PATTERN_PAUS[2];         /* ใส่ตัวอักษร 'U' */
+                pausBuffer[3] = PATTERN_PAUS[3];         /* ใส่ตัวอักษร 'S' */
+
+                while (flagPauseSong && !flagCancelSong) { /* วนลูปค้างไว้ตราบใดที่ยังติด Pause และยังไม่กด Cancel */
+                    renderDisplayBuffer(pausBuffer, 20); /* แสดงคำว่า "PAUS" บนหน้าจอตลอดเวลาที่หยุด */
+                }
+
+                songEndTimeMs += (g_sysTickMs - pauseStartMs); /* ชดเชยเวลาจบเพลงออกไปเท่ากับเวลาที่หยุดพัก */
+                noteStart += (g_sysTickMs - pauseStartMs);     /* ชดเชยเวลาเริ่มโน้ตไม่ให้โน้ตตัวปัจจุบันถูกข้าม */
+
+                if (flagCancelSong) {                    /* กรณีกด Cancel (S1) ในขณะที่กำลัง Pause อยู่ */
+                    setBuzzer(0);                        /* ปิดเสียง */
+                    setAllLeds(false);                   /* ปิดไฟ LED */
+                    flagCancelSong = false;              /* เคลียร์ธงยกเลิก */
+                    flagS2Pressed = false;               /* เคลียร์ธงปุ่ม S2 */
+                    return;                              /* ออกจากฟังก์ชันเล่นเพลงทันที */
+                }
+            }
+
+            setBuzzer((uint32_t)melody[i]);              /* ขับความถี่เสียงของโน้ตตัวที่ i ออกลำโพง */
+            {
+                int remainingSec = (songEndTimeMs > g_sysTickMs) ? (int)((songEndTimeMs - g_sysTickMs + 999) / 1000) : 0; /* คำนวณวินาทีที่เหลือ (ปัดเศษขึ้น) */
+                uint8_t countBuffer[4];                  /* บัฟเฟอร์สำหรับแสดงเวลานับถอยหลัง */
+                updateCountdownBuffer(countBuffer, remainingSec); /* แปลงเวลาที่เหลือเป็นรหัสตัวเลข */
+                renderDisplayBuffer(countBuffer, 10);    /* สแกนแสดงเวลานับถอยหลังบนจอ 7-Segment */
+            }
+        }
+
+        setBuzzer(0);                                    /* ปิดเสียงเมื่อจบโน้ตตัวนั้น */
+        restStart = g_sysTickMs;                         /* บันทึกเวลาเริ่มช่วงเว้นวรรคระหว่างโน้ต */
+        while ((g_sysTickMs - restStart) < 30) {         /* เว้นจังหวะเงียบ 30 ms เพื่อให้แยกเสียงแต่ละโน้ตชัดเจน */
+            int remainingSec;                            /* ตัวแปรเก็บเวลาที่เหลือ */
+            uint8_t countBuffer[4];                      /* บัฟเฟอร์หน้าจอ */
+            if (flagCancelSong) {                        /* เช็กปุ่มยกเลิกระหว่างช่วงเว้นวรรคด้วย */
+                setAllLeds(false);                       /* ปิดไฟ LED */
+                flagCancelSong = false;                  /* เคลียร์ธงยกเลิก */
+                flagS2Pressed = false;                   /* เคลียร์ธงปุ่ม S2 */
+                return;                                  /* ออกจากฟังก์ชันเล่นเพลง */
+            }
+            remainingSec = (songEndTimeMs > g_sysTickMs) ? (int)((songEndTimeMs - g_sysTickMs + 999) / 1000) : 0; /* คำนวณเวลาที่เหลือ */
+            updateCountdownBuffer(countBuffer, remainingSec); /* อัปเดตตัวเลขเวลา */
+            renderDisplayBuffer(countBuffer, 10);        /* สแกนหน้าจอต่อเนื่่องไม่ให้จอกะพริบ */
+        }
+    }
+
+    setBuzzer(0);                                        /* ปิดเสียงเมื่อเล่นจบเพลง */
+    setAllLeds(false);                                   /* ปิดไฟ LED */
+    flagS2Pressed = false;                               /* เคลียร์ธงปุ่ม S2 */
+}
+
+/* =============================================================================
+8. MAIN LOGIC & ENTRY POINT 
+   ============================================================================= */
+static void processInterruptEvents(void) {               /* ฟังก์ชันตรวจสอบธงปุ่มกดและเปลี่ยนสถานะการทำงาน */
+    if (flagS2Pressed) {                                 /* ถ้ามีการกดปุ่ม S2 */
+        flagS2Pressed = false;                           /* เคลียร์ธงปุ่ม S2 */
+        if (currentState == STATE_IDLE_HELLO) {          /* ถ้าอยู่หน้า HELLO */
+            currentState = STATE_SELECT_SONG;            /* เปลี่ยนเข้าสู่หน้าเลือกเพลง */
+        } else if (currentState == STATE_SELECT_SONG) {  /* ถ้าอยู่หน้าเลือกเพลง */
+            currentState = STATE_PLAYING_SONG;           /* เปลี่ยนเข้าสู่สถานะกำลังเล่นเพลง */
+            playSelectedSongWithControls(selectedSongIndex); /* เริ่มเล่นเพลงที่เลือกไว้ */
+            currentState = STATE_SELECT_SONG;            /* เมื่อเล่นจบหรือกด Cancel ให้กลับมาหน้าเลือกเพลง */
+        }
+    }
+    if (flagS3Pressed) {                                 /* ถ้ามีการกดปุ่ม S3 */
+        flagS3Pressed = false;                           /* เคลียร์ธงปุ่ม S3 */
+        if (currentState == STATE_SELECT_SONG) {         /* ถ้าอยู่หน้าเลือกเพลง */
+            selectedSongIndex++;                         /* เลื่อนไปเพลงถัดไป (+1) */
+            if (selectedSongIndex > TOTAL_SONGS) selectedSongIndex = 1; /* ถ้าเกินเพลงสุดท้าย ให้วนกลับมาเพลงที่ 1 */
+        }
+    }
+    if (flagS1Pressed) {                                 /* ถ้ามีการกดปุ่ม S1 */
+        flagS1Pressed = false;                           /* เคลียร์ธงปุ่ม S1 */
+        if (currentState == STATE_SELECT_SONG) {         /* ถ้าอยู่หน้าเลือกเพลง */
+            selectedSongIndex--;                         /* เลื่อนกลับไปเพลงก่อนหน้า (-1) */
+            if (selectedSongIndex < 1) selectedSongIndex = TOTAL_SONGS; /* ถ้าน้อยกว่า 1 ให้วนไปเพลงสุดท้าย (5) */
+        }
+    }
+}
+
+const uint8_t SCROLL_TEXT[] = {                          /* อาเรย์เก็บชุดตัวอักษรวิ่ง "HELLO" พร้อมช่องว่างหัว-ท้าย */
+    0xFF, 0xFF, 0xFF, 0xFF,                              /* ช่องว่าง 4 หลักก่อนข้อความเข้าจอ */
+    0x89, 0x86, 0xC7, 0xC7, 0xC0,                        /* รหัสตัวอักษร H, E, L, L, O */
+    0xFF, 0xFF, 0xFF, 0xFF                               /* ช่องว่าง 4 หลักหลังข้อความพ้นจอ */
+};
+const int SCROLL_TEXT_LEN = sizeof(SCROLL_TEXT) / sizeof(SCROLL_TEXT[0]); /* คำนวณความยาวทั้งหมดของอาเรย์ข้อความวิ่ง */
+
+int main(void) {                                         /* ฟังก์ชันหลักจุดเริ่มต้นการทำงานของโปรแกรม */
+    uint8_t currentBuffer[4];                            /* บัฟเฟอร์ 4 ช่องสำหรับเก็บข้อมูลแสดงผลบนจอ 7-Segment */
+    uint32_t lastScrollTime = 0;                         /* ตัวแปรเก็บเวลาล่าสุดที่เลื่อนตัวอักษร */
+    int scrollIndex = 0;                                 /* ดัชนีตำแหน่งเริ่มต้นของข้อความวิ่ง */
+    int i;                                               /* ตัวแปรสำรอง */
+
+    hardware_init();                                     /* เรียกฟังก์ชันตั้งค่าฮาร์ดแวร์ทั้งหมด */
+    setAllLeds(false);                                   /* สั่งปิดไฟ LED ทุกดวง */
+    setBuzzer(0);                                        /* สั่งปิดเสียง Buzzer */
+
+    while (1) {                                          /* ลูปหลักทำงานวนซ้ำตลอดเวลาไม่มีที่สิ้นสุด */
+        processInterruptEvents();                        /* ตรวจสอบและจัดการเหตุการณ์จากการกดปุ่ม */
+        
+        if (currentState == STATE_IDLE_HELLO) {          /* กรณีอยู่ในสถานะหน้าจอเริ่มต้น HELLO */
+            if ((g_sysTickMs - lastScrollTime) > 350) {  /* ตรวจสอบว่าผ่านไปครบ 350 ms หรือยัง */
+                lastScrollTime = g_sysTickMs;            /* อัปเดตเวลาที่เลื่อนล่าสุด */
+                scrollIndex++;                           /* ขยับตำแหน่งข้อความไปทางซ้าย 1 ช่อง */
+                if (scrollIndex > (SCROLL_TEXT_LEN - 4)) { /* ถ้าเลื่อนจนสุดความยาวข้อความแล้ว */
+                    scrollIndex = 0;                     /* รีเซ็ตกลับไปเริ่มต้นเลื่อนใหม่ */
+                }
+            }
+            
+            currentBuffer[0] = SCROLL_TEXT[scrollIndex + 0]; /* ดึงตัวอักษรใส่จอหลักที่ 1 (ซ้ายสุด) */
+            currentBuffer[1] = SCROLL_TEXT[scrollIndex + 1]; /* ดึงตัวอักษรใส่จอหลักที่ 2 */
+            currentBuffer[2] = SCROLL_TEXT[scrollIndex + 2]; /* ดึงตัวอักษรใส่จอหลักที่ 3 */
+            currentBuffer[3] = SCROLL_TEXT[scrollIndex + 3]; /* ดึงตัวอักษรใส่จอหลักที่ 4 (ขวาสุด) */
+            
+        } else if (currentState == STATE_SELECT_SONG) {  /* กรณีอยู่ในสถานะหน้าจอเลือกเพลง */
+            currentBuffer[0] = 0x92;                     /* แสดงตัวอักษร 'S' ในหลักที่ 1 */
+            currentBuffer[1] = 0xBF;                     /* แสดงเครื่องหมาย '-' ในหลักที่ 2 */
+            currentBuffer[2] = DIGIT_MAP[(selectedSongIndex / 10) % 10]; /* แสดงหลักสิบของหมายเลขเพลงในหลักที่ 3 */
+            currentBuffer[3] = DIGIT_MAP[selectedSongIndex % 10];        /* แสดงหลักหน่วยของหมายเลขเพลงในหลักที่ 4 */
+        }
+        
+        renderDisplayBuffer(currentBuffer, 30);          /* สั่งกวาดแสดงผลข้อมูลบนจอ 7-Segment เป็นเวลา 30 ms */
+    }
+}

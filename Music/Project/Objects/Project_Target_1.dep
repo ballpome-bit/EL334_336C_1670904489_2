@@ -1,0 +1,17 @@
+Dependencies for Project 'Project', Target 'Target_1': (DO NOT MODIFY !)
+CompilerVersion: 6240000::V6.24::ARMCLANG
+F (.\Project.c)(0x6B036207)(-xc -std=c99 --target=arm-arm-none-eabi -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -c-fno-rtti -funsigned-char -fshort-enums -fshort-wchar-D__EVAL -gdwarf-4 -O0 -ffunction-sections -Wall -Wextra -Wno-packed -Wno-reserved-id-macro -Wno-unused-macros -Wno-documentation-unknown-command -Wno-documentation -Wno-license-management -Wno-parentheses-equality -Wno-reserved-identifier-I./RTE/_Target_1-IC:/Users/Oniijin/AppData/Local/Arm/Packs/ARM/CMSIS/6.4.0/CMSIS/Core/Include-IC:/Users/Oniijin/AppData/Local/Arm/Packs/NXP/MK64F12_DFP-D__UVISION_VERSION="543" -DCPU_MK64FN1M0VLL12 -D_RTE_-o ./objects/project.o -MMD)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\MK64F12.h)(0x61D558DC)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\ARM\CMSIS\6.4.0\CMSIS\Core\Include\core_cm4.h)(0x6B035835)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\system_MK64F12.h)(0x61D558DC)
+F (C:/Users/Oniijin/AppData/Local/Arm/Packs/NXP/MK64F12_DFP/system_MK64F12.c)(0x61D558DC)(-xc -std=c99 --target=arm-arm-none-eabi -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -c-fno-rtti -funsigned-char -fshort-enums -fshort-wchar-D__EVAL -gdwarf-4 -O0 -ffunction-sections -Wall -Wextra -Wno-packed -Wno-reserved-id-macro -Wno-unused-macros -Wno-documentation-unknown-command -Wno-documentation -Wno-license-management -Wno-parentheses-equality -Wno-reserved-identifier-I./RTE/_Target_1-IC:/Users/Oniijin/AppData/Local/Arm/Packs/ARM/CMSIS/6.4.0/CMSIS/Core/Include-IC:/Users/Oniijin/AppData/Local/Arm/Packs/NXP/MK64F12_DFP-D__UVISION_VERSION="543" -DCPU_MK64FN1M0VLL12 -D_RTE_-o ./objects/system_mk64f12.o -MMD)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\fsl_device_registers.h)(0x61D558DC)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\MK64F12.h)(0x61D558DC)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\ARM\CMSIS\6.4.0\CMSIS\Core\Include\core_cm4.h)(0x6B035835)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\system_MK64F12.h)(0x61D558DC)
+I (C:\Users\Oniijin\AppData\Local\Arm\Packs\NXP\MK64F12_DFP\MK64F12_features.h)(0x61D558DC)
+F (RTE/Device/MK64FN1M0VLL12/MK64FN1M0xxx12_flash.scf)(0x61D558DC)()
+F (RTE/Device/MK64FN1M0VLL12/MK64FN1M0xxx12_ram.scf)(0x61D558DC)()
+F (RTE/Device/MK64FN1M0VLL12/MK64FX512xxx12_flash.scf)(0x61D558DC)()
+F (RTE/Device/MK64FN1M0VLL12/MK64FX512xxx12_ram.scf)(0x61D558DC)()
+F (RTE/Device/MK64FN1M0VLL12/startup_MK64F12.S)(0x61D558DC)(--target=arm-arm-none-eabi -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -masm=auto  -Wa,armasm,--diag_suppress=A1950W -c-gdwarf-4 -D__EVAL -MMD-I./RTE/_Target_1-IC:/Users/Oniijin/AppData/Local/Arm/Packs/ARM/CMSIS/6.4.0/CMSIS/Core/Include-IC:/Users/Oniijin/AppData/Local/Arm/Packs/NXP/MK64F12_DFP-D__UVISION_VERSION=543 -DCPU_MK64FN1M0VLL12 -D_RTE_-o ./objects/startup_mk64f12.o)
