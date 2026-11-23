@@ -1,0 +1,147 @@
+<html>
+<body>
+<pre>
+<h1>µVision Build Log</h1>
+<h2>Tool Versions:</h2>
+IDE-Version: µVision V5.37.0.0
+Copyright (C) 2022 ARM Ltd and ARM Germany GmbH. All rights reserved.
+License Information: Eng Engineer11 Bu Flex license: MDK Professional 5.37 (Flex) (mdk_pro) Operation stops: 1 Aug 2027
+ 
+Tool Versions:
+Toolchain:       MDK Professional 5.37 (Flex)  Version: 5.37.0.0
+Toolchain Path:  C:\Keil_v5\ARM\ARMCLANG\Bin
+C Compiler:      ArmClang.exe V6.18
+Assembler:       Armasm.exe V6.18
+Linker/Locator:  ArmLink.exe V6.18
+Library Manager: ArmAr.exe V6.18
+Hex Converter:   FromElf.exe V6.18
+CPU DLL:         SARMCM3.DLL V5.37.0.0
+Dialog DLL:      DCM.DLL V1.17.5.0
+Target DLL:      CMSIS_AGDI.dll V1.33.12.0
+Dialog DLL:      TCM.DLL V1.56.1.0
+ 
+<h2>Project:</h2>
+C:\Users\Micro_404_17\Desktop\Project_el334\Project.uvprojx
+Project File Date:  11/23/2026
+
+<h2>Output:</h2>
+*** Using Compiler 'V6.18', folder: 'C:\Keil_v5\ARM\ARMCLANG\Bin'
+Build target 'Target 1'
+assembling startup_MK64F12.s...
+compiling system_MK64F12.c...
+Project.c(23): warning: no previous prototype for function 'SysTick_Handler' [-Wmissing-prototypes]
+void SysTick_Handler(void) {                             /* ????????????????? SysTick ????????? 1 ms */
+     ^
+Project.c(23): note: declare 'static' if the function is not intended to be used outside of this translation unit
+void SysTick_Handler(void) {                             /* ????????????????? SysTick ????????? 1 ms */
+^
+static 
+Project.c(47): warning: implicit conversion changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+    PTA->PDDR &= ~(1<<1);                                /* ?????????? PTA1 ???? Input (High-Z) ???????????????????????????? */
+              ~~ ^~~~~~~
+Project.c(52): warning: implicit conversion changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+        PTA->PDDR &= ~(1<<1);                            /* ?????????? Input ???????????????????????? */
+                  ~~ ^~~~~~~
+Project.c(62): warning: implicit conversion changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+            PTA->PDDR &= ~(1<<1);                        /* ???????? Input (????????) ????????????????????????? */
+                      ~~ ^~~~~~~
+Project.c(69): warning: implicit conversion changes signedness: 'int' to 'unsigned int' [-Wsign-conversion]
+        PTA->PDDR &= ~(1<<1);                            /* ?????????????????????????????????????????????? */
+                  ~~ ^~~~~~~
+Project.c(90): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static volatile bool flagS1Pressed = false;              /* ?????????????????????? S1 ??????????????? */
+                ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(91): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static volatile bool flagS2Pressed = false;              /* ?????????????????????? S2 */
+                ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(92): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static volatile bool flagS3Pressed = false;              /* ?????????????????????? S3 ??????????????? */
+                ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(93): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static volatile bool flagCancelSong = false;             /* ??????????????????????? (?? S1 ???????????) */
+                ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(94): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static volatile bool flagPauseSong  = false;             /* ??????????????/??????? (?? S2 ???????????) */
+                ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(100): warning: no previous prototype for function 'PORTB_IRQHandler' [-Wmissing-prototypes]
+void PORTB_IRQHandler(void) {                            /* ??????????????????????????????????? Port B */
+     ^
+Project.c(100): note: declare 'static' if the function is not intended to be used outside of this translation unit
+void PORTB_IRQHandler(void) {                            /* ??????????????????????????????????? Port B */
+^
+static 
+Project.c(177): warning: '_Bool' is a C99 extension [-Wc99-extensions]
+static void setAllLeds(bool state) {                     /* ????????????/????? LED ?? Shield ???? 4 ??????????? */
+                       ^
+C:\Keil_v5\ARM\ARMCLANG\Bin\..\include\stdbool.h(15): note: expanded from macro 'bool'
+    #define bool _Bool
+                 ^
+Project.c(468): warning: no previous extern declaration for non-static variable 'SCROLL_TEXT' [-Wmissing-variable-declarations]
+const uint8_t SCROLL_TEXT[] = {                          /* ????????????????????????? "HELLO" ????????????????-???? */
+              ^
+Project.c(468): note: declare 'static' if the variable is not intended to be used outside of this translation unit
+const uint8_t SCROLL_TEXT[] = {                          /* ????????????????????????? "HELLO" ????????????????-???? */
+      ^
+Project.c(473): warning: no previous extern declaration for non-static variable 'SCROLL_TEXT_LEN' [-Wmissing-variable-declarations]
+const int SCROLL_TEXT_LEN = sizeof(SCROLL_TEXT) / sizeof(SCROLL_TEXT[0]); /* ??????????????????????????????????????? */
+          ^
+Project.c(473): note: declare 'static' if the variable is not intended to be used outside of this translation unit
+const int SCROLL_TEXT_LEN = sizeof(SCROLL_TEXT) / sizeof(SCROLL_TEXT[0]); /* ??????????????????????????????????????? */
+      ^
+Project.c(511): warning: no newline at end of file [-Wnewline-eof]
+}
+ ^
+Project.c(479): warning: unused variable 'i' [-Wunused-variable]
+    int i;                                               /* ??????????? */
+        ^
+16 warnings generated.
+compiling Project.c...
+linking...
+Program Size: Code=4498 RO-data=2294 RW-data=8 ZI-data=1144  
+".\Objects\Project.axf" - 0 Error(s), 16 Warning(s).
+
+<h2>Software Packages used:</h2>
+
+Package Vendor: ARM
+                http://www.keil.com/pack/ARM.CMSIS.5.9.0.pack
+                ARM.CMSIS.5.9.0
+                CMSIS (Common Microcontroller Software Interface Standard)
+   * Component: CORE Version: 5.6.0
+
+Package Vendor: Keil
+                http://www.keil.com/pack/Keil.Kinetis_K60_DFP.1.5.0.pack
+                Keil.Kinetis_K60_DFP.1.5.0
+                NXP Kinetis K60 Series Device Support and Examples
+   * Component: Startup Version: 1.0.0
+
+<h2>Collection of Component include folders:</h2>
+  ./RTE/_Target_1
+  C:/Users/Micro_404_17/AppData/Local/Arm/Packs/ARM/CMSIS/5.9.0/CMSIS/Core/Include
+  C:/Users/Micro_404_17/AppData/Local/Arm/Packs/Keil/Kinetis_K60_DFP/1.5.0/Device/Include
+
+<h2>Collection of Component Files used:</h2>
+
+   * Component: ARM::CMSIS:CORE:5.6.0
+
+   * Component: Keil::Device:Startup:1.0.0
+      Source file:   Device/Source/system_MK64F12.c
+      Source file:   Device/Source/ARM/startup_MK64F12.s
+Build Time Elapsed:  00:00:01
+</pre>
+</body>
+</html>
